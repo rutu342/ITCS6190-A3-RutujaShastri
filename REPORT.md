@@ -172,6 +172,10 @@ the five boroughs. The trip counts across the five boroughs sum to
 
 ## The two plans
 
+**Note:** The blocks below are concise transcriptions of the physical
+plans from the Spark run, not verbatim full `explain()` output. They
+show the principal operators and their relationships.
+
 ### `explain()` output of Part 2a (DataFrame API)
 
 ``` text
@@ -214,18 +218,21 @@ AdaptiveSparkPlan isFinalPlan=false
 
 ### Comparison
 
-Both plans scan the trips and zones CSV files. Both use an inner
-`BroadcastHashJoin`, with the zones data on the build-right side, and
-both perform partial and final hash aggregation. An `Exchange` using
-hash partitioning redistributes data by the aggregation keys. A final
-range-partitioning exchange supports the requested sort.
+Both plans scan the trips and zones CSV files. In each plan, the trips
+scan applies filters for valid timestamps and numeric fares. Both use an
+inner `BroadcastHashJoin`, with the zones data on the build-right side.
+Each plan uses partial and final hash aggregation, with a
+hash-partitioning `Exchange` between the partial and final aggregation
+stages to redistribute records by the grouping keys. Each plan also uses
+a range-partitioning `Exchange` before the final `Sort` to meet its
+ordering requirement.
 
-The main differences are the grouping keys and sorting requirements.
-Part 2a groups by pickup date and pickup zone, then sorts by date and
-zone ID. Part 3 groups by borough and computes trip count, revenue and
-average distance, then sorts by revenue descending. Although one query
-uses the DataFrame API and the other uses Spark SQL, Spark produces
-similar physical strategies for their joins and aggregations.
+The main differences are the grouping keys and sort columns. Part 2a
+groups by pickup date and pickup zone, then sorts by date and zone ID.
+Part 3 groups by borough and calculates trip count, revenue, and average
+distance, then sorts by revenue descending. Although the queries were
+written using different interfaces, Spark's Catalyst optimizer produces
+similar physical operators for the joins and aggregations.
 
 ------------------------------------------------------------------------
 
@@ -235,18 +242,21 @@ For 200 million trips, I would keep Spark DataFrame transformations,
 `try_cast`-based validation, distributed aggregations, the window
 function, and the SQL query. I would first avoid forcing large results
 into one output file with `coalesce(1)`, because this can create a
-single-task bottleneck. I would also consider partitioned Parquet
-storage, partition pruning, and reusing or caching the cleaned data when
-it is used by multiple analyses. I would inspect Spark UI metrics and
-physical plans to identify expensive shuffles and data skew before
-applying further tuning.
+single-task bottleneck. I would store cleaned data as Parquet and
+consider partitioning it by a commonly filtered column such as `day` so
+queries can skip irrelevant partitions. I would evaluate caching or
+reusing the cleaned dataset because multiple analyses use it, while
+checking memory pressure and Spark UI metrics. I would also inspect the
+physical plans and Spark UI for expensive shuffles and data skew before
+making further tuning changes.
 
 ------------------------------------------------------------------------
 
 ## Problems and fixes
 
-When starting the cluster, Docker reported a container-name conflict
-because containers named `spark-master`, `spark-worker-1`, and
-`spark-worker-2` already existed. I removed the old containers and
-restarted the cluster using Docker Compose. The Spark application then
-completed successfully and generated all four result outputs.
+When starting the cluster, existing containers named `spark-master`,
+`spark-worker-1`, and `spark-worker-2` caused a container-name conflict.
+I removed the old containers and restarted the cluster using Docker
+Compose. The Spark application then completed successfully and generated
+all four result outputs. The exact Docker error text was not retained in
+my notes.
